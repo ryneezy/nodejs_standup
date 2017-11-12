@@ -1,0 +1,16 @@
+{
+  "name": "standup_bot",
+  "version": "0.0.1",
+  "description": "Node.js Standup Bot",
+  "scripts": {
+    "standup": "node standup.js"
+  },
+  "dependencies": {
+    "@slack/client": "^3.14.1",
+    "node-schedule": "^1.2.5",
+    "winston": "^2.4.0"
+  },
+  "devDependencies": {},
+  "author": "Ryan Samiley",
+  "license": "MIT"
+}
