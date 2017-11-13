@@ -14,7 +14,7 @@ to ask.
 
 #### Running
 Once you have your `SLACK_API_TOKEN` in an environment variable and updated
-`config.js`, simply run `npm run`
+`config.js`, simply run `npm run standup`
 
 Arguably, you probably want to set this up as a daemon somewhere instead of
 hosting it on your laptop so daily standup is not interrupted if you close

@@ -5,6 +5,7 @@ const RtmClient = Slack.RtmClient
 const RTM_EVENTS = Slack.RTM_EVENTS
 const MemoryDataStore = Slack.MemoryDataStore
 const Winston = require('winston')
+const dateformat = require('dateformat')
 
 Winston.loggers.add('logger', {
   file: {
@@ -16,11 +17,10 @@ Winston.loggers.add('logger', {
 const logger = Winston.loggers.get('logger')
 
 const config = require('./config.js')
-const token = process.env.SLACK_API_TOKEN || ''
 
 // Slack clients
-const slackWeb = new WebClient(token)
-const slackRtm = new RtmClient(token, {
+const slackWeb = new WebClient(config.slackApiToken)
+const slackRtm = new RtmClient(config.slackApiToken, {
   dataStore: new MemoryDataStore()
 })
 
@@ -28,29 +28,31 @@ const slackRtm = new RtmClient(token, {
 const userToDM = {}
 
 // Hash that maps a Direct Message ID to a standup status
-const dmToStatus = {}
+const dmToAnswers = {}
 
 function clearHash(hash) {
   for (var k in hash) delete hash[k]
 }
 
 /**
- * Sends a question to a user
- * @to_user {string} The question to send
- * @question {hash} a question with keys color and question
- * @fn {function} callback function
+ * Sends a Direct Message to the user
+ * @to_user {String} The question to send
+ * @message{String} The message to send
+ * @fn {Function} callback function
  */
-function sendQuestion(to_user, question, fn) {
-  logger.info(`Sending question ${question.question} to ${to_user}`)
-  slackWeb.chat.postMessage(`@${to_user}`, '', {
-    as_user: true,
-    attachments: [
-      {
-        color: question.color,
-        text: question.question
-      }
-    ]
-  }, (err, res) => fn(err, res))
+function sendMessage(to_user, message, fn) {
+  logger.debug(`Sending message ${message} to ${to_user}`)
+  slackWeb.chat.postMessage(`@${to_user}`, message, { as_user: true }, (err, res) => fn(err, res))
+}
+
+function logIfError(err, res) {
+  if (err) {
+    logger.error(err)
+  }
+}
+
+function getStandupDate() {
+  return dateformat(new Date(), 'yyyy-mm-dd')
 }
 
 /**
@@ -58,34 +60,43 @@ function sendQuestion(to_user, question, fn) {
  */
 function standup() {
   logger.info("Starting standup...")
-  const datum = [userToDM, dmToStatus]
+  const datum = [userToDM, dmToAnswers]
   datum.forEach(d => clearHash(d))
 
-  const q = config.standupQuestions[0]
+  if (config.standupQuestions.length == 0) {
+    logger.warn("No questions configured for daily standup. Bailing")
+    return
+  }
+
+  const firstQuestion = config.standupQuestions[0]
   config.teamMembers.forEach(person => {
-    sendQuestion(person, q, (err, res) => {
+    // Send a greeting
+    const message = `Huzah *${person}*! It's time for *${getStandupDate()}* daily stand up. Please answer the following questions.\n${firstQuestion.question}`
+    sendMessage(person, message, (err, res) => {
       if (err) {
         logger.error(err)
         return
       }
       const channel = res.channel
       userToDM[person] = channel
-      dmToStatus[channel] = []
+      dmToAnswers[channel] = []
     })
   })
 }
 
 /**
  * Posts a user's stand up status to the team channel
- * @param user {string} team member's username
+ * @param user {String} team member's username
  */
 function postStatusToTeam(user) {
   const dmId = userToDM[user]
-  const status = dmToStatus[dmId]
+  const status = dmToAnswers[dmId]
 
-  slackWeb.chat.postMessage(config.teamChannel, `*${user}'s* standup status is`, {
+  const u = slackRtm.dataStore.getUserByName(user)
+  slackWeb.chat.postMessage(config.teamChannel, `*${u.profile.real_name}* posted status for *${getStandupDate()}* standup:`, {
     as_user: false,
-    as_user: user,
+    username: user,
+    icon_url: u.profile.image_48,
     attachments: status.map(s => {
       return {
         color: s.color,
@@ -93,11 +104,7 @@ function postStatusToTeam(user) {
         text: s.answer
       }
     })
-  }, (err, res) => {
-    if (err) {
-      logger.error(err)
-    }
-  })
+  }, (err, res) => logIfError(err, res))
 }
 
 /**
@@ -109,43 +116,56 @@ function postStatusToTeam(user) {
  * will not correlate to the question, but for the most part this should work.
  * Hopefully your daily standup is not mission critical ¯\_(ツ)_/¯
  *
- * @message {hash} Slack's message hash.
+ * @message {Object} Slack's message hash.
  * @see https://api.slack.com/events/message
  */
 function processMessage(message) {
-  const user = slackRtm.dataStore.getUserById(message.user).name
-  if (config.teamMembers.indexOf(user) >= 0) {
-    const dmId = userToDM[user]
-    const answers = dmToStatus[dmId]
-    if (answers.length == config.standupQuestions.length) {
-      logger.info(`User ${user} already answered all stand up questions. Bailing`)
-      return;
-    }
-
-    const question = config.standupQuestions[answers.length]
-    const answer = message.text
-    logger.info(`Received answer ${answer} from ${user} for question ${question.question}`)
-    answers.push({
-      question: question.question,
-      color: question.color,
-      answer: answer
-    })
-
-    const nextQuestionIndex = answers.length
-    if (nextQuestionIndex >= config.standupQuestions.length) {
-      logger.info(`${user} completed stand up questions. Posting answers to team`)
-      postStatusToTeam(user)
-      return
-    }
-
-    sendQuestion(user, config.standupQuestions[nextQuestionIndex], (err, res) => {
-      if (err) {
-        logger.error(err)
-        return
-      }
-      // Don't do anything for result, we'll get another callback here.
-    })
+  if (message.subtype == 'bot_message') {
+    return
   }
+
+  const user = slackRtm.dataStore.getUserById(message.user).name
+  if (config.teamMembers.indexOf(user) < 0) {
+    return
+  }
+
+  const dmId = userToDM[user]
+  if (!(dmId in dmToAnswers)) {
+    // Wasn't answering standupBot. Ignore.
+    return
+  }
+  const answers = dmToAnswers[dmId]
+
+  // Already answered all questions.
+  if (answers.length == config.standupQuestions.length) {
+    logger.info(`User ${user} already answered all stand up questions. Bailing`)
+    const message = `You already answered your stand up questions. You can view your status in channel ${config.teamChannel}`
+    sendMessage(user, message, (err, res) => logIfError(err, res))
+    return
+  }
+
+  // Save the answer
+  const question = config.standupQuestions[answers.length]
+  const answer = message.text
+  logger.info(`Received answer ${answer} from ${user} for question ${question.question}`)
+  answers.push({
+    question: question.question,
+    color: question.color,
+    answer: answer
+  })
+
+  // All answers completed, post to team channel and thank the user
+  const nextQuestionIndex = answers.length
+  if (nextQuestionIndex >= config.standupQuestions.length) {
+    logger.info(`${user} completed stand up questions. Posting answers to team`)
+    postStatusToTeam(user)
+    const message = `Your stand up status was posted in channel ${config.teamChannel}`
+    sendMessage(user, message, (err, res) => logIfError(err, res))
+    return
+  }
+
+  // Ask the next question
+  sendMessage(user, config.standupQuestions[nextQuestionIndex].question, (err, res) => logIfError(err, res))
 }
 
 // Connect to Slack's Real Time Messaging API and register to Message Events
