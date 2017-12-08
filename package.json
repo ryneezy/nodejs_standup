@@ -2,6 +2,10 @@
   "name": "standup_bot",
   "version": "0.0.1",
   "description": "Node.js Standup Bot",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ryneezy/nodejs_standup.git"
+  },
   "scripts": {
     "standup": "node standup.js"
   },
