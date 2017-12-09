@@ -120,7 +120,14 @@ function postStatusToTeam(user) {
  * @see https://api.slack.com/events/message
  */
 function processMessage(message) {
-  if (message.subtype == 'bot_message') {
+  // Only process direct messages and ignore bot_messages
+  if (!message.channel.startsWith('D') || message.subtype == 'bot_message') {
+    return
+  }
+
+  // Subtype means the message could have been edited or deleted.
+  // We don't support that yet :(
+  if (message.subtype) {
     return
   }
 

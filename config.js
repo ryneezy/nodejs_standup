@@ -24,6 +24,6 @@ config.standupQuestions = [
   }
 ]
 
-config.slackApiToken= process.env.SLACK_API_TOKEN || ''
+config.slackApiToken = process.env.SLACK_API_TOKEN || ''
 
 module.exports = config
