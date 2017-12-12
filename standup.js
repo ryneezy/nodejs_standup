@@ -71,10 +71,10 @@ function standup() {
   const firstQuestion = config.standupQuestions[0]
   config.teamMembers.forEach(person => {
     // Send a greeting
-    const message = `Huzah *${person}*! It's time for *${getStandupDate()}* daily stand up. Please answer the following questions.\n${firstQuestion.question}`
+    const message = `Huzzah *${person}*! It's time for *${getStandupDate()}* daily stand up. Please answer the following questions.\n${firstQuestion.question}`
     sendMessage(person, message, (err, res) => {
       if (err) {
-        logger.error(err)
+        logger.error(`Error starting standup with ${person} due to ${error}`)
         return
       }
       const channel = res.channel
@@ -138,7 +138,7 @@ function processMessage(message) {
 
   const dmId = userToDM[user]
   if (!(dmId in dmToAnswers)) {
-    // Wasn't answering standupBot. Ignore.
+    sendMessage(user, "Sorry. Standup hasn't started or you aren't part of the team :(", (err, res) => logIfError(err, res))
     return
   }
   const answers = dmToAnswers[dmId]
